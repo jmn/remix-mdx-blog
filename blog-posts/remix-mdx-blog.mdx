@@ -1,0 +1,252 @@
+---
+layout: post
+title: "MDX blog in Remix.run"
+description: "A minimal MDX blog in Remix.run with some nifty features"
+category: web
+tags: [remix]
+date: 2022-02-05
+---
+
+export const Thing = () => (
+  <button
+    className="btn"
+    onClick={() => {
+      alert("Hey");
+    }}
+  >
+    Click Me!
+  </button>
+);
+
+## Benefits of MDX
+
+The benefit of MDX is simply that you can use components inside your Markdown.
+Hey look a button: <Thing />
+
+## Code
+
+Create a Remix.run project using `npx create-remix@latest` and choose TypeScript and to host it on Vercel.
+
+### Modify `tsconfig.json`
+
+- Set `"target" to `"ES2020"`
+- Add the line`"module": "ES2020",`
+
+### Install packages
+
+`npm install --save-exact mdx-bundler front-matter rehype-highlight remark-gfm rehype-autolink-headings rehype-toc rehype-slug esbuild@"0.12.09`
+
+Create a folder in your project `app/utils` and add these files:
+
+### `app/utils/fs.server.ts`
+
+```ts
+export { readFile } from "fs/promises";
+export { resolve } from "path";
+```
+
+### `app/utils/mdx.server.ts`
+
+```ts
+export { bundleMDX } from "mdx-bundler";
+```
+
+### `app/utils/post.tsx`
+
+```tsx
+import parseFrontMatter from "front-matter";
+import fs from "fs/promises";
+import path from "path";
+import { bundleMDX } from "./mdx.server";
+import haskell from "highlight.js/lib/languages/haskell";
+
+export type Post = {
+  slug: string;
+  title: string;
+};
+
+export type PostMarkdownAttributes = {
+  title: string;
+};
+
+export async function getPost(slug: string) {
+  const source = await fs.readFile(
+    path.join(`${__dirname}/../../blog-posts`, slug + ".mdx"),
+    "utf-8"
+  );
+  const rehypeHighlight = await import("rehype-highlight").then(
+    (mod) => mod.default
+  );
+  const { default: remarkGfm } = await import("remark-gfm");
+  const { default: rehypeAutolinkHeadings } = await import(
+    "rehype-autolink-headings"
+  );
+
+  const { default: rehypeToc } = await import("rehype-toc");
+  const { default: rehypeSlug } = await import("rehype-slug");
+
+  const post = await bundleMDX({
+    source,
+    xdmOptions(options, frontmatter) {
+      options.remarkPlugins = [
+        ...(options.remarkPlugins ?? []),
+        // remarkMdxImages,
+        remarkGfm,
+        // remarkBreaks,
+        // [remarkFootnotes, { inlineNotes: true }],
+      ];
+      options.rehypePlugins = [
+        ...(options.rehypePlugins ?? []),
+        rehypeAutolinkHeadings,
+        rehypeSlug,
+        rehypeToc,
+        [
+          rehypeHighlight,
+          { format: "detect", ignoreMissing: true, languages: { haskell } },
+        ],
+      ];
+
+      return options;
+    },
+  }).catch((e) => {
+    console.error(e);
+    throw e;
+  });
+
+  return post;
+}
+
+export async function getPosts() {
+  const postsPath = await fs.readdir(`${__dirname}/../../blog-posts`, {
+    withFileTypes: true,
+  });
+
+  const posts = await Promise.all(
+    postsPath.map(async (dirent) => {
+      const file = await fs.readFile(
+        path.join(`${__dirname}/../../blog-posts`, dirent.name)
+      );
+      const { attributes } = parseFrontMatter(file.toString());
+      return {
+        slug: dirent.name.replace(/\.mdx/, ""),
+        //@ts-ignore
+        title: attributes.title,
+      };
+    })
+  );
+  return posts;
+}
+```
+
+## Create route handlers
+
+### `app/routes/index.tsx`
+
+```tsx
+import { Link, useLoaderData } from "remix";
+
+import { getPosts } from "~/utils/post";
+import type { Post } from "~/utils/post";
+
+export const loader = async () => {
+  return getPosts();
+};
+
+export default function Posts() {
+  const posts = useLoaderData<Post[]>();
+  return (
+    <div>
+      <h1>Posts</h1>
+      <ul>
+        {posts.map((post) => (
+          <li key={post.slug}>
+            <Link to={post.slug}>{post.title}</Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### `app/routes/$.tsx`
+
+This is the "slug" handler.
+
+```tsx
+import { getMDXComponent } from "mdx-bundler/client";
+import { useMemo } from "react";
+import { json, Link, LoaderFunction, useLoaderData } from "remix";
+import { getPost } from "~/utils/post";
+
+type LoaderData = {
+  frontmatter: any;
+  code: string;
+};
+
+export const loader: LoaderFunction = async ({ params, request }) => {
+  const slug = params["*"];
+  if (!slug) throw new Response("Not found", { status: 404 });
+
+  const post = await getPost(slug);
+  if (post) {
+    const { frontmatter, code } = post;
+    return json({ frontmatter, code });
+  }
+};
+
+export default function Post() {
+  const { code, frontmatter } = useLoaderData<LoaderData>();
+  const Component = useMemo(() => getMDXComponent(code), [code]);
+
+  return (
+    <>
+      <Link to="/">← Back to blog index</Link>
+      <h1>{frontmatter.title}</h1>
+
+      <Component />
+    </>
+  );
+}
+```
+
+## Create your first post
+
+Create a folder in your project called `blog-posts` and add a file `blog-posts/first-post.mdx`:
+
+````mdx
+---
+title: "First post"
+description: "the first post."
+date: 2022-02-03
+---
+
+I'm trying something out with Remix.
+
+## code
+
+```js
+import { Outlet } from "remix";
+
+export default function Blog() {
+  return (
+    <div className="flex justify-center">
+      <div className="prose lg:prose-xl py-10">
+        <Outlet />
+      </div>
+    </div>
+  );
+}
+```
+````
+
+## Features
+
+### Tailwind CSS
+
+### Code Syntax Highlighting
+
+### Hosting on Vercel
+
+- `npm i -g vercel`
+- `vercel` (use default values)
