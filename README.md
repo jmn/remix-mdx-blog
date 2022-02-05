@@ -1,3 +1,6 @@
+# A template for blogging with MDX with Remix on Vercel.
+Read the [Blog post](https://blog.oldweb2.com/remix-mdx-blog).
+
 # Welcome to Remix!
 
 - [Remix Docs](https://remix.run/docs)
